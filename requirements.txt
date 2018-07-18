@@ -1,0 +1,6 @@
+certifi==2018.4.16
+Django==1.11
+django-telegrambot==1.0.1
+future==0.16.0
+python-telegram-bot==10.1.0
+pytz==2018.5
