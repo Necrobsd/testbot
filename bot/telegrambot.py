@@ -1,9 +1,16 @@
+import logging
+
+from django.core.mail import send_mail
 from django_telegrambot.apps import DjangoTelegramBot
 from telegram import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import (CommandHandler, MessageHandler, RegexHandler,
                           Filters, ConversationHandler)
+
+from testbot.settings import EMAIL_HOST_USER
 from .models import Project, ReferralUser, Settings
 
+
+logger = logging.getLogger(__name__)
 
 main_keyboard = ReplyKeyboardMarkup([
     [KeyboardButton('Как зарабатывать в интернете')],
@@ -182,7 +189,6 @@ def text_processing(bot, update):
     """
     Функция обработки ответов пользователя
     """
-    print('text processing')
     projects = [project.title for project in Project.objects.all()]
     text = update.message.text
     if text == 'Как зарабатывать в интернете':
@@ -228,8 +234,8 @@ def show_project(bot, update):
                             reply_text,
                             reply_markup=go_back_keyboard)
 
-# Диалог с пользователем для создания заказа
 
+# Диалог с пользователем для создания заказа
 CONFIRM_NAME, GET_NAME, PHONE, EMAIL = range(4)
 
 
@@ -322,27 +328,79 @@ def get_email(bot, update):
     update.message.reply_text('Ваши данные приняты. Ожидайте '
                               'с Вами свяжутся в ближайшее время',
                               reply_markup=ReplyKeyboardRemove())
+    message = create_message(orders.get(update.message.chat_id))
+    send_message(bot, message)
+    send_email_message(message)
     del orders[update.message.chat_id]
     home(bot, update)
 
     return ConversationHandler.END
 
 
+def create_message(order_info):
+    """
+    Создание сообщения
+    """
+    text = ('Новый заказ!\n'
+            'Имя клиента: {name},\n'
+            'Ник телеграм: {username},\n'
+            'Телефон: {phone},\n'
+            'E-mail: {email}'.format(name=order_info.get('name'),
+                                     username=order_info.get('username', 'Нет'),
+                                     phone=order_info.get('phone'),
+                                     email=order_info.get('email')))
+    return text
+
+
+def send_message(bot, message):
+    """
+    Функция отправки сообщения о заказе в телеграмм
+    """
+
+    if Settings.objects.exists():
+        if Settings.objects.first().telegram:
+            telegram_id = Settings.objects.first().telegram.chat_id
+            bot.sendMessage(telegram_id, message)
+    else:
+        logger.info('Отсутствует Telegram ID для отправки информации о заказах')
+
+
+def send_email_message(message):
+    """
+    Отправка сообщения о новом заказе на Email
+    """
+    email = None
+    if Settings.objects.exists():
+        if Settings.objects.first().email:
+            email = Settings.objects.first().email
+    if email is not None:
+        try:
+            send_mail(subject='Новый заказ',
+                      message=message,
+                      from_email=EMAIL_HOST_USER,
+                      recipient_list=[email],
+                      fail_silently=False)
+        except Exception as e:
+            logger.error('Ошибка отправки E-mail: {}'.format(e))
+    else:
+        logger.info('Отсутствует Email для отправки информации о заказах')
+
+
 conv_handler = ConversationHandler(
     entry_points=[RegexHandler('^Сделать заказ$', start_conversation)],
-    states= {
+    states={
         CONFIRM_NAME: [RegexHandler('^(Да|Нет)$', confirm_name)],
         GET_NAME: [MessageHandler(Filters.text, get_name)],
         PHONE: [MessageHandler(Filters.contact, get_phone)],
         EMAIL: [MessageHandler(Filters.text, get_email)]
     },
-    fallbacks = [CommandHandler('cancel', cancel)]
+    fallbacks=[CommandHandler('cancel', cancel)]
 )
 
 
 def error(bot, update, error):
     """Log Errors caused by Updates."""
-    print('Update "%s" caused error "%s"', update, error)
+    logger.error('Update "%s" caused error "%s"', update, error)
 
 
 def main():
