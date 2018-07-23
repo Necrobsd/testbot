@@ -1,8 +1,9 @@
 from django_telegrambot.apps import DjangoTelegramBot
-from telegram import KeyboardButton, ReplyKeyboardMarkup
-from telegram.ext import CommandHandler, MessageHandler, Filters
+from telegram import KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram.ext import (CommandHandler, MessageHandler, RegexHandler,
+                          Filters, ConversationHandler)
+from .models import Project, ReferralUser, Settings
 
-from .models import Project, ReferralUser
 
 main_keyboard = ReplyKeyboardMarkup([
     [KeyboardButton('Как зарабатывать в интернете')],
@@ -14,6 +15,12 @@ go_back_keyboard = ReplyKeyboardMarkup([
     [KeyboardButton('Назад')]
 ], resize_keyboard=True)
 
+get_phone_keyboard = ReplyKeyboardMarkup([
+    [KeyboardButton('Отправить свой номер телефона', request_contact=True)]
+], resize_keyboard=True, one_time_keyboard=True)
+
+orders = {}
+
 
 def start(bot, update):
     """
@@ -22,6 +29,7 @@ def start(bot, update):
     name = update.message.chat.first_name
     if update.message.chat.last_name:
         name += ' {}'.format(update.message.chat.last_name)
+    username = update.message.chat.username
     text = 'Добро пожаловать!'
     try:
         referral_code = update.message.text.split(' ')[1]
@@ -36,19 +44,19 @@ def start(bot, update):
 
     try:
         ReferralUser.objects.get(chat_id=update.message.chat_id)
-        user = None
     except ReferralUser.DoesNotExist:
         user = ReferralUser.objects.create(
             chat_id=update.message.chat_id,
             name=name,
+            username=username,
             parent=parent
         )
         if parent is not None:
-            update_balance(user.id)
+            increase_balance(user.id)
     update.message.reply_text(text=text, reply_markup=main_keyboard)
 
 
-def update_balance(user_id):
+def increase_balance(user_id):
     """
     Функция увеличивает баланс у родителей за привлеченного пользователя
     """
@@ -69,12 +77,15 @@ def projects_list(bot, update):
     """
     Функция отображения списка проектов по заработку в интернете
     """
+    text = 'Проекты еще не добавлены'
+    keyboard = main_keyboard
     projects = Project.objects.all()
-    keyboard = ReplyKeyboardMarkup([
-        [KeyboardButton(project.title)] for project in projects
-    ])
-    update.message.reply_text('Проекты по заработку в интернете:',
-                              reply_markup=keyboard)
+    if projects.exists():
+        text = 'Проекты по заработку в интернете:'
+        keyboard = ReplyKeyboardMarkup([
+            [KeyboardButton(project.title)] for project in projects
+        ])
+    update.message.reply_text(text, reply_markup=keyboard)
 
 
 def friends_menu(bot, update):
@@ -88,7 +99,7 @@ def friends_menu(bot, update):
         [KeyboardButton('Описание')],
         [KeyboardButton('Назад')],
     ])
-    update.message.reply_text('Приглашенные друзья', reply_markup=keyboard)
+    update.message.reply_text('Выберите действие', reply_markup=keyboard)
 
 
 def get_referral_link(bot, update):
@@ -142,10 +153,36 @@ def get_balance(bot, update):
         update.message.reply_text('Ваш баланс: {}'.format(user.balance))
 
 
+def show_description(bot, update):
+    """
+    Функция выводит описание на странице с приглашенными пользователями
+    """
+    description = 'Описание пока не добавлено'
+    if Settings.objects.exists():
+        if Settings.objects.first().referrals_description:
+            description = Settings.objects.first().referrals_description
+    update.message.reply_text(description)
+
+
+def show_order_notification(bot, update):
+    """
+    Функция выводит текст описания при нажании на кнопку Заказать
+    """
+    text = 'Текст еще не добавлен'
+    keyboard = ReplyKeyboardMarkup([
+        [KeyboardButton('Сделать заказ')]
+    ], resize_keyboard=True)
+    if Settings.objects.exists():
+        if Settings.objects.first().order_text:
+            text = Settings.objects.first().order_text
+    update.message.reply_text(text, reply_markup=keyboard)
+
+
 def text_processing(bot, update):
     """
     Функция обработки ответов пользователя
     """
+    print('text processing')
     projects = [project.title for project in Project.objects.all()]
     text = update.message.text
     if text == 'Как зарабатывать в интернете':
@@ -160,8 +197,12 @@ def text_processing(bot, update):
         get_referral_link(bot, update)
     elif text == 'Баланс':
         get_balance(bot, update)
+    elif text == 'Описание':
+        show_description(bot, update)
     elif text in projects:
         show_project(bot, update)
+    elif text == 'Заказать':
+        show_order_notification(bot, update)
 
 
 def show_project(bot, update):
@@ -187,16 +228,126 @@ def show_project(bot, update):
                             reply_text,
                             reply_markup=go_back_keyboard)
 
+# Диалог с пользователем для создания заказа
+
+CONFIRM_NAME, GET_NAME, PHONE, EMAIL = range(4)
+
+
+def cancel(bot, update):
+    """
+    Функция для отмены заказа
+    """
+    order = orders.get(update.message.chat_id, None)
+    if order is not None:
+        del orders[update.message.chat_id]
+    update.message.reply_text('Заказ отменен')
+    home(bot, update)
+    return ConversationHandler.END
+
+
+def start_conversation(bot, update):
+    """
+    Функция начала диалога
+    """
+    user = update.message.from_user
+    keyboard = ReplyKeyboardMarkup([
+        [KeyboardButton('Да'), KeyboardButton('Нет')]
+    ], resize_keyboard=True, one_time_keyboard=True)
+    update.message.reply_text('Ваше имя {}?'.format(user.first_name),
+                              reply_markup=keyboard)
+    return CONFIRM_NAME
+
+
+def confirm_name(bot, update):
+    """
+    Функция для подтверждения имени клиента, полученного автоматически
+    """
+    user = update.message.from_user
+    text = update.message.text
+    if text == 'Да':
+        orders[update.message.chat_id] = {'name': user.first_name}
+        if user.username:
+            orders[update.message.chat_id].update(
+                {'username': '@{}'.format(user.username)}
+            )
+        update.message.reply_text('Пришлите Ваш номер телефона, или отправьте '
+                                  '/cancel для отмены заказа',
+                                  reply_markup=get_phone_keyboard)
+        return PHONE
+    elif text == 'Нет':
+        keyboard = ReplyKeyboardRemove()
+        update.message.reply_text('Введите Ваше имя, или отправьте /cancel для'
+                                  ' отмены заказа',
+                                  reply_markup=keyboard)
+        return GET_NAME
+
+
+def get_name(bot, update):
+    """
+    Функция для получения имени клиента, указанного вручную
+    """
+    text = update.message.text
+    user = update.message.from_user
+    orders[update.message.chat_id] = {'name': text}
+    if user.username:
+        orders[update.message.chat_id].update(
+            {'username': '@{}'.format(user.username)}
+        )
+    update.message.reply_text('Спасибо, {}! '
+                              'Пришлите Ваш номер телефона, или отправьте '
+                              '/cancel для отмены заказа'.format(text),
+                              reply_markup=get_phone_keyboard)
+    return PHONE
+
+
+def get_phone(bot, update):
+    """
+    Функция для получения номера телефона клиента
+    """
+    phone_number = update.message.contact.phone_number
+    orders[update.message.chat_id].update({'phone': phone_number})
+    update.message.reply_text('Спасибо! Теперь укажите Ваш E-mail, или '
+                              'отправьте /cancel для отмены заказа',
+                              reply_markup=ReplyKeyboardRemove())
+
+    return EMAIL
+
+
+def get_email(bot, update):
+    """
+    Функция для получения E-mail адреса клиента
+    """
+    email = update.message.text
+    orders[update.message.chat_id].update({'email': email})
+    update.message.reply_text('Ваши данные приняты. Ожидайте '
+                              'с Вами свяжутся в ближайшее время',
+                              reply_markup=ReplyKeyboardRemove())
+    del orders[update.message.chat_id]
+    home(bot, update)
+
+    return ConversationHandler.END
+
+
+conv_handler = ConversationHandler(
+    entry_points=[RegexHandler('^Сделать заказ$', start_conversation)],
+    states= {
+        CONFIRM_NAME: [RegexHandler('^(Да|Нет)$', confirm_name)],
+        GET_NAME: [MessageHandler(Filters.text, get_name)],
+        PHONE: [MessageHandler(Filters.contact, get_phone)],
+        EMAIL: [MessageHandler(Filters.text, get_email)]
+    },
+    fallbacks = [CommandHandler('cancel', cancel)]
+)
+
+
+def error(bot, update, error):
+    """Log Errors caused by Updates."""
+    print('Update "%s" caused error "%s"', update, error)
+
 
 def main():
-
-    # Default dispatcher (this is related to the first bot in settings.DJANGO_TELEGRAMBOT['BOTS'])
     dp = DjangoTelegramBot.dispatcher
-    # To get Dispatcher related to a specific bot
-    # dp = DjangoTelegramBot.getDispatcher('BOT_n_token')     #get by bot token
-    # dp = DjangoTelegramBot.getDispatcher('BOT_n_username')  #get by bot username
-
-    # on different commands - answer in Telegram
-
     dp.add_handler(CommandHandler("start", start))
+    dp.add_handler(conv_handler)
     dp.add_handler(MessageHandler(Filters.text, text_processing))
+    dp.add_error_handler(error)

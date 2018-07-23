@@ -30,6 +30,9 @@ class ReferralUser(MPTTModel):
                                   verbose_name='Идентификатор пользователя')
     name = models.CharField(max_length=100,
                             verbose_name='Имя пользователя')
+    username = models.CharField(max_length=100,
+                                verbose_name='Телеграм username',
+                                blank=True, default='')
     refer_code = models.CharField(max_length=30, db_index=True,
                                   verbose_name='Хэш для реферальной ссылки')
     parent = TreeForeignKey('self', on_delete=models.SET_NULL, db_index=True,
@@ -39,7 +42,10 @@ class ReferralUser(MPTTModel):
                                   verbose_name='Баланс', default=0)
 
     def __str__(self):
-        return self.name
+        string = '{}'.format(self.name)
+        if self.username:
+            string += ': @{}'.format(self.username)
+        return string
 
     def save(self, *args, **kwargs):
         # При сохранении пользователя добавляем ему реферальную ссылку
@@ -53,23 +59,33 @@ class ReferralUser(MPTTModel):
         verbose_name_plural = 'Пользователи'
 
 
-class Order(models.Model):
+class Settings(models.Model):
     """
-    Класс для модели Заказов.
+    Класс для настроек бота: содержит настройки контактов хозяина сервиса.
+    Тексты с описаниями для вывода пользователям.
     """
-    name = models.CharField(max_length=100,
-                            verbose_name='Имя заказчика')
-    username = models.CharField(max_length=100,
-                                verbose_name='Telegram Username')
-    email = models.EmailField(verbose_name='E-mail адрес')
-    phone = models.CharField(max_length=16,
-                             verbose_name='Номер телефона')
+    email = models.EmailField(
+        verbose_name='Е-mail адрес',
+        help_text=('На данный адрес будет отправляться '
+                   'информация о новых заказах')
+    )
+    telegram = models.ForeignKey(
+        ReferralUser,
+        verbose_name='Телеграмм аккаунт',
+        help_text=('На данный адрес будет отправляться '
+                   'информация о новых заказах')
+    )
+    referrals_description = models.TextField(
+        verbose_name='Текст описания на странице "Приглашенные друзья"',
+        blank=True
+    )
+    order_text = models.TextField(
+        verbose_name='Текст выводимый при нажатии на кнопку Заказать',
+        blank=True
+    )
 
-# class OwnerContact(models.Model):
-    """
-    Класс для модели контактов собственника.
-    Email и телеграмм контакты хозяина бота.
+    def __str__(self):
+        return 'Настройки'
 
-    """
-    # email = models.EmailField(verbose_name='Е-mail адрес')
-    # telegram = models.CharField(verbose_name='Идентификатор телеграмм аккаунта')
+    class Meta:
+        verbose_name = verbose_name_plural = 'Настройки'
