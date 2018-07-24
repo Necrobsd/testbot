@@ -55,7 +55,7 @@ def start(bot, update):
         user = ReferralUser.objects.create(
             chat_id=update.message.chat_id,
             name=name,
-            username=username,
+            username=username if username is not None else '',
             parent=parent
         )
         if parent is not None:
