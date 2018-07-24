@@ -1,4 +1,5 @@
 import logging
+import re
 
 from django.core.mail import send_mail
 from django_telegrambot.apps import DjangoTelegramBot
@@ -329,17 +330,28 @@ def get_email(bot, update):
     Функция для получения E-mail адреса клиента
     """
     email = update.message.text
-    orders[update.message.chat_id].update({'email': email})
-    update.message.reply_text('Ваши данные приняты. Ожидайте '
-                              'с Вами свяжутся в ближайшее время',
-                              reply_markup=ReplyKeyboardRemove())
-    message = create_message(orders.get(update.message.chat_id))
-    send_message(bot, message)
-    send_email_message(message)
-    del orders[update.message.chat_id]
-    home(bot, update)
+    regex_email = re.compile(
+        r'^[a-z0-9](\.?[a-z0-9_-]){0,}@[a-z0-9-]+\.([a-z]{1,6}\.)?[a-z]{2,6}$'
+    )
+    if regex_email.match(email):
+        orders[update.message.chat_id].update({'email': email})
+        update.message.reply_text('Ваши данные приняты. Ожидайте '
+                                  'с Вами свяжутся в ближайшее время',
+                                  reply_markup=ReplyKeyboardRemove())
+        message = create_message(orders.get(update.message.chat_id))
+        send_message(bot, message)
+        send_email_message(message)
+        del orders[update.message.chat_id]
+        home(bot, update)
 
-    return ConversationHandler.END
+        return ConversationHandler.END
+    else:
+        update.message.reply_text('Введен некорректный Email: {}\n'
+                                  'укажите правильный E-mail, или отправьте '
+                                  '/cancel для отмены заказа'.format(email),
+                                  reply_markup=ReplyKeyboardRemove())
+        return EMAIL
+
 
 
 def create_message(order_info):
