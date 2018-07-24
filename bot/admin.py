@@ -10,4 +10,3 @@ class SettingsAdmin(admin.ModelAdmin):
 
 
 admin.site.register(Project)
-admin.site.register(ReferralUser)

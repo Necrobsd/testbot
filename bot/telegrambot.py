@@ -95,6 +95,35 @@ def projects_list(bot, update):
     update.message.reply_text(text, reply_markup=keyboard)
 
 
+def show_project(bot, update):
+    """
+    Функция вывода детальной информации по проекту
+    """
+    text = update.message.text
+    try:
+        project = Project.objects.get(title=text)
+    except Project.DoesNotExist:
+        project = None
+    if project:
+        reply_text = '<b>{title}</b>\n<i>{description}</i>\n'.format(
+            title=project.title,
+            description=project.description
+        )
+        if project.image:
+            reply_text += '<a href="https://rutests.com{}">&#8205;</a>\n'.format(
+                project.image.url
+            )
+        if project.link:
+            reply_text += '<a href="{}">Ссылка на сайт проекта</a>\n'.format(
+                project.link
+            )
+
+        bot.sendMessage(update.message.chat_id,
+                        reply_text,
+                        reply_markup=go_back_keyboard,
+                        parse_mode='HTML')
+
+
 def friends_menu(bot, update):
     """
     Функция отображения меню для работы с приглашенными друзьями
@@ -209,39 +238,6 @@ def text_processing(bot, update):
         show_project(bot, update)
     elif text == 'Заказать':
         show_order_notification(bot, update)
-
-
-def show_project(bot, update):
-    """
-    Функция вывода детальной информации по проекту
-    """
-    text = update.message.text
-    try:
-        project = Project.objects.get(title=text)
-    except Project.DoesNotExist:
-        project = None
-    if project:
-        reply_text = '<b>{title}</b>\n<i>{description}</i>\n'.format(
-            title=project.title,
-            description=project.description
-        )
-        if project.image:
-            reply_text += '<a href="https://rutests.com{}">&#8205;</a>\n'.format(
-                project.image.url
-            )
-        if project.link:
-            reply_text += '<a href="{}">Ссылка на сайт проекта</a>\n'.format(
-                project.link
-            )
-
-        bot.sendMessage(update.message.chat_id,
-                        reply_text,
-                        reply_markup=go_back_keyboard,
-                        parse_mode='HTML')
-            # bot.sendPhoto(update.message.chat_id,
-            #               photo=open(project.image.path, 'rb'),
-            #               caption=reply_text,
-            #               reply_markup=go_back_keyboard)
 
 
 # Диалог с пользователем для создания заказа
